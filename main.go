@@ -9,7 +9,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"os"
+
 	"github.com/fatih/color"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -36,6 +38,9 @@ func main() {
 
 		case LIST_CLASSES :
 			listClasses(gradeDB)
+
+		case ADD_GRADE :
+			addGradeMenu(gradeDB)
 			
 		case EXIT :
 			running = false
@@ -61,10 +66,7 @@ func getUserOption() int {
 
 func listClasses(db *sql.DB) {
 	fmt.Println("---------------------")
-	rows, err := db.Query("SELECT ClassID, ClassName FROM Classes;")
-	if err != nil {
-		log.Fatal(err)
-	}
+	rows := getClassRows(db)
 
 	for rows.Next() {
 		var className string
@@ -84,21 +86,30 @@ func listClassAssignments(db *sql.DB, classID int){
 	rows := getClassAssignments(db, classID)
 
 	for rows.Next() {
+		var id int
 		var assName string
 		var weight, grade float64
-		rows.Scan(&assName, &weight, &grade)
+		rows.Scan(&id, &assName, &weight, &grade)
 		fmt.Println("│   ├──", assName)
 		fmt.Println("│   │   ├── Ass Weight: ", weight)
-		fmt.Println("│   │   ├── Ass Grade: ", grade)
+		fmt.Println("│   │   ├── Ass Grade: ", grade,"%")
 	}
 
 }
 
-func getClassAssignments(db *sql.DB, classID int) *sql.Rows {
-	rows, err := db.Query("SELECT AssignmentName, Weight, Grade FROM Assignments WHERE ClassID=?", classID)
+func getClassRows(db *sql.DB) *sql.Rows {
+	rows, err := db.Query("SELECT ClassID, ClassName FROM Classes;")
 	checkErr(err)
 	return rows
 }
+
+func getClassAssignments(db *sql.DB, classID int) *sql.Rows {
+	rows, err := db.Query("SELECT AssignmentID, AssignmentName, Weight, Grade FROM Assignments WHERE ClassID=?", classID)
+	checkErr(err)
+	return rows
+}
+
+
 
 func addNewClass(db *sql.DB) {
 	var className string
@@ -127,6 +138,78 @@ func addNewClass(db *sql.DB) {
 		fmt.Scanln(&assWeight)
 		insertNewAssignment(db, classID, assName, assWeight)
 	}
+}
+
+func addGradeMenu(db *sql.DB) {
+	var classID, assignmentID, lastID int
+	lastID = 1
+	fmt.Println("---------------------")
+	fmt.Println("| Choose a class ID from Below:")
+	rows := getClassRows(db)
+	
+	for rows.Next() {
+		var id int
+		var name string
+		rows.Scan(&id, &name)
+		fmt.Printf("| %d  %s\n", id, name)
+	}
+	fmt.Printf("\n> ")
+	fmt.Scanln(&classID)
+
+	for assignmentID != lastID {
+		fmt.Println("---------------------")
+		assignmentID, lastID = chooseAssignment(db, classID)
+		if assignmentID != lastID {
+			changeGrade(db, assignmentID)
+		}
+	}
+}
+
+func changeGrade(db *sql.DB, gradeID int) {
+	var maxScore, userScore int
+	var scorePercent float64
+	fmt.Println("Beginning grade change")
+	fmt.Printf("Max Score: > ")
+	fmt.Scanln(&maxScore)
+	fmt.Printf("Your Score: > ")
+	fmt.Scanln(&userScore)
+	scorePercent = float64(userScore) / float64(maxScore) * 100 //maybe add a 0 check
+	scorePercent = math.Floor(scorePercent * 100) / 100
+	fmt.Println("Your score was", scorePercent, "%")
+	fmt.Println("Updating score...")
+	updateGrade(db, gradeID, scorePercent)
+}
+
+func updateGrade(db *sql.DB, gradeID int, gradeScore float64) {
+	query, err := db.Prepare("UPDATE Assignments SET Grade=? WHERE AssignmentID=?")
+	checkErr(err)
+	defer query.Close()
+
+	_, err = query.Exec(gradeScore, gradeID)
+	checkErr(err)
+	c:= color.New(color.FgHiBlack)
+	c.Println("Grade updated")
+	fmt.Scanln()
+}
+
+func chooseAssignment(db *sql.DB, classID int) (int, int){
+	var assignmentID, lastID int
+	fmt.Println("| Choose an Assignment ID from below:")
+	rows := getClassAssignments(db, classID)
+	
+	for rows.Next() {
+		var id int
+		var name string
+		rows.Scan(&id, &name, nil, nil)
+		fmt.Printf("| %d  %s\n", id, name)
+		lastID = id
+	}
+	color.Red("| %d Return", lastID + 1)
+	
+	fmt.Printf("\n> ")
+	fmt.Scanln(&assignmentID)
+	fmt.Println("---------------------")
+	return assignmentID, lastID + 1
 }
 
 func insertNewAssignment(db *sql.DB, classID int, assName string, assWeight float64) {
